@@ -1,0 +1,53 @@
+name: Build Watch8 Larger Font v5 (Phone Unchanged)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+      - name: Install Android API and build tools
+        run: sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Locate project (supports single ZIP upload)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f settings.gradle && -d app && -d wear ]]; then
+            echo "PROJECT=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          else
+            mapfile -t zips < <(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -iname '*Order*Source*.zip' | sort)
+            if [[ ${#zips[@]} -ne 1 ]]; then
+              echo 'ERROR: upload exactly one *Order*Source*.zip, or upload extracted source tree'
+              exit 1
+            fi
+            mkdir -p "$RUNNER_TEMP/order-reminder-sync"
+            unzip -q "${zips[0]}" -d "$RUNNER_TEMP/order-reminder-sync"
+            [[ -f "$RUNNER_TEMP/order-reminder-sync/settings.gradle" ]] || { echo 'ERROR: missing settings.gradle'; exit 1; }
+            echo "PROJECT=$RUNNER_TEMP/order-reminder-sync" >> "$GITHUB_ENV"
+          fi
+      - name: Build Watch APK ONLY (do not build or reinstall phone app)
+        run: gradle --no-daemon --stacktrace --project-dir "$PROJECT" :wear:assembleDebug
+      - name: Upload Watch 8 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrderReminder-Watch8-LargerFont-v5
+          path: ${{ env.PROJECT }}/wear/build/outputs/apk/debug/wear-debug.apk
+          if-no-files-found: error
